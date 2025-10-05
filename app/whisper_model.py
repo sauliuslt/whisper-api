@@ -152,7 +152,8 @@ class WhisperModel:
                 "temperature": temperature,
                 "word_timestamps": word_timestamps,
                 "fp16": False if self._device == "cpu" else (settings.whisper_compute_type == "float16"),
-                "verbose": False
+                "verbose": False,
+                "condition_on_previous_text": False  # Prevent hallucination loops
             }
 
             # Remove None values
