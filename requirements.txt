@@ -1,0 +1,27 @@
+# Core dependencies
+openai-whisper==20240930
+torch>=2.0.0
+torchaudio>=2.0.0
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.12
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# Audio processing
+ffmpeg-python==0.2.0
+librosa==0.10.2
+soundfile==0.12.1
+
+# GPU monitoring and optimization
+nvidia-ml-py==12.555.43
+gpustat==1.1.1
+
+# Development and testing
+pytest==8.3.3
+pytest-asyncio==0.24.0
+httpx==0.27.2
+python-dotenv==1.0.1
+
+# Optional performance improvements
+numba==0.60.0
