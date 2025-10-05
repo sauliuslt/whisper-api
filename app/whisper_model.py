@@ -30,6 +30,32 @@ class WhisperModel:
     def load_model(self):
         """Load Whisper model with GPU acceleration."""
         try:
+            # Debug GPU detection
+            logger.info("=" * 50)
+            logger.info("GPU DETECTION DEBUG INFO")
+            logger.info(f"settings.whisper_device: {settings.whisper_device}")
+            logger.info(f"torch.cuda.is_available(): {torch.cuda.is_available()}")
+            logger.info(f"torch.cuda.device_count(): {torch.cuda.device_count() if torch.cuda.is_available() else 'N/A'}")
+            logger.info(f"CUDA_VISIBLE_DEVICES env: {os.environ.get('CUDA_VISIBLE_DEVICES', 'Not set')}")
+
+            if torch.cuda.is_available():
+                logger.info(f"CUDA version: {torch.version.cuda}")
+                logger.info(f"PyTorch version: {torch.__version__}")
+                for i in range(torch.cuda.device_count()):
+                    logger.info(f"GPU {i}: {torch.cuda.get_device_name(i)}")
+                    props = torch.cuda.get_device_properties(i)
+                    logger.info(f"  - Memory: {props.total_memory / 1e9:.2f} GB")
+                    logger.info(f"  - Compute Capability: {props.major}.{props.minor}")
+            else:
+                logger.warning("CUDA is NOT available!")
+                logger.info(f"PyTorch version: {torch.__version__}")
+                logger.info("Possible reasons:")
+                logger.info("  1. No NVIDIA GPU present")
+                logger.info("  2. NVIDIA drivers not installed")
+                logger.info("  3. PyTorch installed without CUDA support")
+                logger.info("  4. CUDA toolkit version mismatch")
+            logger.info("=" * 50)
+
             # Set CUDA device
             if settings.whisper_device == "cuda" and torch.cuda.is_available():
                 os.environ["CUDA_VISIBLE_DEVICES"] = settings.cuda_visible_devices
@@ -38,11 +64,14 @@ class WhisperModel:
                 # Set memory fraction
                 torch.cuda.set_per_process_memory_fraction(settings.gpu_memory_fraction)
 
-                logger.info(f"Using GPU: {torch.cuda.get_device_name()}")
-                logger.info(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+                logger.info(f"✓ Using GPU: {torch.cuda.get_device_name()}")
+                logger.info(f"✓ GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
             else:
                 self._device = "cpu"
-                logger.warning("CUDA not available, falling back to CPU")
+                if settings.whisper_device == "cuda":
+                    logger.error("GPU was requested but not available, falling back to CPU")
+                else:
+                    logger.info("Using CPU as configured")
 
             # Load model
             logger.info(f"Loading Whisper model: {settings.whisper_model}")
@@ -63,6 +92,9 @@ class WhisperModel:
             # Set compute type for faster inference
             if self._device == "cuda" and settings.whisper_compute_type == "float16":
                 self._model = self._model.half()
+            elif self._device == "cpu":
+                # Ensure model is in float32 for CPU
+                self._model = self._model.float()
 
             logger.info("Model loaded successfully")
 
@@ -81,7 +113,7 @@ class WhisperModel:
             dummy_audio = torch.zeros(16000).to(self._device)
             _ = self._model.transcribe(
                 dummy_audio.cpu().numpy(),
-                fp16=(self._device == "cuda" and settings.whisper_compute_type == "float16")
+                fp16=False if self._device == "cpu" else (settings.whisper_compute_type == "float16")
             )
             logger.info("Model warmup completed")
         except Exception as e:
@@ -115,7 +147,7 @@ class WhisperModel:
                 "initial_prompt": prompt,
                 "temperature": temperature,
                 "word_timestamps": word_timestamps,
-                "fp16": (self._device == "cuda" and settings.whisper_compute_type == "float16"),
+                "fp16": False if self._device == "cpu" else (settings.whisper_compute_type == "float16"),
                 "verbose": False
             }
 

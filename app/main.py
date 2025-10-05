@@ -88,6 +88,7 @@ async def health_check():
 
 
 @app.post("/v1/audio/transcriptions")
+@app.post("/api/v1/audio/transcriptions")  # Also support /api prefix
 async def transcribe_audio(
     file: UploadFile = File(...),
     model: str = Form(default="whisper-1"),

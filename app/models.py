@@ -94,3 +94,6 @@ class HealthResponse(BaseModel):
     gpu_name: Optional[str] = None
     gpu_memory_used: Optional[float] = None
     gpu_memory_total: Optional[float] = None
+
+    class Config:
+        protected_namespaces = ()  # Disable protected namespace check

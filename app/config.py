@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        protected_namespaces = ('settings_',)  # Fix Pydantic warning
 
     @property
     def allowed_formats_list(self) -> List[str]:

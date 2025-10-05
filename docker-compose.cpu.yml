@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  whisper-api:
+    build: .
+    image: whisper-api:latest
+    container_name: whisper-api
+    ports:
+      - "8000:8000"
+    environment:
+      # Whisper Configuration - CPU MODE
+      - WHISPER_MODEL=base  # Use smaller model for CPU
+      - WHISPER_DEVICE=cpu   # Force CPU mode
+      - WHISPER_COMPUTE_TYPE=float32
+      # API Configuration
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - MAX_AUDIO_FILE_SIZE_MB=25
+      # Performance
+      - ENABLE_MODEL_CACHE=true
+      - MODEL_CACHE_DIR=/app/models
+    volumes:
+      # Mount model cache to persist downloaded models
+      - ./models:/app/models
+    # Remove GPU section for CPU-only mode
+    restart: unless-stopped
+    networks:
+      - whisper-network
+
+networks:
+  whisper-network:
+    driver: bridge
