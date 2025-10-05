@@ -89,10 +89,9 @@ class WhisperModel:
                 download_root=download_root
             )
 
-            # Set compute type for faster inference
-            if self._device == "cuda" and settings.whisper_compute_type == "float16":
-                self._model = self._model.half()
-            elif self._device == "cpu":
+            # Don't manually convert to half - let Whisper handle fp16 internally
+            # The fp16 parameter in transcribe() will handle the precision
+            if self._device == "cpu":
                 # Ensure model is in float32 for CPU
                 self._model = self._model.float()
 
@@ -110,14 +109,19 @@ class WhisperModel:
         try:
             logger.info("Warming up model...")
             # Create a small dummy audio array (1 second of silence)
-            dummy_audio = torch.zeros(16000).to(self._device)
+            dummy_audio = torch.zeros(16000, dtype=torch.float32)
+
+            # Use fp16 only for CUDA
+            use_fp16 = self._device == "cuda" and settings.whisper_compute_type == "float16"
+
             _ = self._model.transcribe(
                 dummy_audio.cpu().numpy(),
-                fp16=False if self._device == "cpu" else (settings.whisper_compute_type == "float16")
+                fp16=use_fp16,
+                language='en'  # Specify language to skip detection during warmup
             )
-            logger.info("Model warmup completed")
+            logger.info("Model warmup completed successfully")
         except Exception as e:
-            logger.warning(f"Model warmup failed: {e}")
+            logger.warning(f"Model warmup failed (non-critical): {e}")
 
     def transcribe(
         self,
