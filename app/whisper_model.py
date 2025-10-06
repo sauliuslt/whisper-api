@@ -1,9 +1,9 @@
-"""Whisper model management with GPU acceleration."""
+"""Whisper model management with GPU acceleration using faster-whisper."""
 
 import os
 import logging
 import torch
-import whisper
+from faster_whisper import WhisperModel as FasterWhisperModel
 from typing import Optional, Dict, Any
 from app.config import settings
 
@@ -60,10 +60,6 @@ class WhisperModel:
             if settings.whisper_device == "cuda" and torch.cuda.is_available():
                 os.environ["CUDA_VISIBLE_DEVICES"] = settings.cuda_visible_devices
                 self._device = "cuda"
-
-                # Set memory fraction
-                torch.cuda.set_per_process_memory_fraction(settings.gpu_memory_fraction)
-
                 logger.info(f"✓ Using GPU: {torch.cuda.get_device_name()}")
                 logger.info(f"✓ GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
             else:
@@ -73,7 +69,7 @@ class WhisperModel:
                 else:
                     logger.info("Using CPU as configured")
 
-            # Load model
+            # Load model using faster-whisper
             logger.info(f"Loading Whisper model: {settings.whisper_model}")
 
             # Set download root for model caching
@@ -83,17 +79,16 @@ class WhisperModel:
             else:
                 download_root = None
 
-            self._model = whisper.load_model(
-                name=settings.whisper_model,
-                device=self._device,
-                download_root=download_root
-            )
+            # Map compute type
+            compute_type = settings.whisper_compute_type if self._device == "cuda" else "int8"
 
-            # Don't manually convert to half - let Whisper handle fp16 internally
-            # The fp16 parameter in transcribe() will handle the precision
-            if self._device == "cpu":
-                # Ensure model is in float32 for CPU
-                self._model = self._model.float()
+            self._model = FasterWhisperModel(
+                model_size_or_path=settings.whisper_model,
+                device=self._device,
+                compute_type=compute_type,
+                download_root=download_root,
+                device_index=0 if self._device == "cuda" else None
+            )
 
             logger.info("Model loaded successfully")
 
@@ -109,16 +104,17 @@ class WhisperModel:
         try:
             logger.info("Warming up model...")
             # Create a small dummy audio array (1 second of silence)
-            dummy_audio = torch.zeros(16000, dtype=torch.float32)
+            import numpy as np
+            dummy_audio = np.zeros(16000, dtype=np.float32)
 
-            # Use fp16 only for CUDA
-            use_fp16 = self._device == "cuda" and settings.whisper_compute_type == "float16"
-
-            _ = self._model.transcribe(
-                dummy_audio.cpu().numpy(),
-                fp16=use_fp16,
-                language='en'  # Specify language to skip detection during warmup
+            # Perform warmup transcription
+            segments, _ = self._model.transcribe(
+                dummy_audio,
+                language='en',
+                beam_size=5
             )
+            # Consume the generator
+            list(segments)
             logger.info("Model warmup completed successfully")
         except Exception as e:
             logger.warning(f"Model warmup failed (non-critical): {e}")
@@ -145,28 +141,70 @@ class WhisperModel:
             Transcription results dictionary
         """
         try:
-            # Disable word_timestamps on CUDA due to Triton compatibility issue
-            # (triton API changes break openai-whisper's median_filter_cuda)
-            if word_timestamps and self._device == "cuda":
-                logger.warning("Word timestamps disabled on CUDA due to Triton compatibility issue")
-                word_timestamps = False
-
-            # Prepare transcription options
+            # Prepare transcription options for faster-whisper
             options = {
                 "language": language,
                 "initial_prompt": prompt,
                 "temperature": temperature,
                 "word_timestamps": word_timestamps,
-                "fp16": False if self._device == "cpu" else (settings.whisper_compute_type == "float16"),
-                "verbose": False,
-                "condition_on_previous_text": False  # Prevent hallucination loops
+                "beam_size": 5,
+                "condition_on_previous_text": False,  # Prevent hallucination loops
+                "vad_filter": True,  # Enable voice activity detection
+                "vad_parameters": {
+                    "threshold": 0.5,
+                    "min_speech_duration_ms": 250,
+                    "min_silence_duration_ms": 100
+                }
             }
 
             # Remove None values
             options = {k: v for k, v in options.items() if v is not None}
 
             # Perform transcription
-            result = self._model.transcribe(audio_path, **options)
+            segments, info = self._model.transcribe(audio_path, **options)
+
+            # Convert generator to list and format output to match OpenAI Whisper format
+            segments_list = list(segments)
+
+            # Build text
+            text = " ".join([segment.text.strip() for segment in segments_list])
+
+            # Build segments array
+            formatted_segments = []
+            for segment in segments_list:
+                seg_dict = {
+                    "id": segment.id,
+                    "seek": segment.seek,
+                    "start": segment.start,
+                    "end": segment.end,
+                    "text": segment.text,
+                    "tokens": segment.tokens,
+                    "temperature": segment.temperature,
+                    "avg_logprob": segment.avg_logprob,
+                    "compression_ratio": segment.compression_ratio,
+                    "no_speech_prob": segment.no_speech_prob
+                }
+
+                # Add words if word_timestamps is enabled
+                if word_timestamps and segment.words:
+                    seg_dict["words"] = [
+                        {
+                            "word": word.word,
+                            "start": word.start,
+                            "end": word.end,
+                            "probability": word.probability
+                        }
+                        for word in segment.words
+                    ]
+
+                formatted_segments.append(seg_dict)
+
+            # Build result dict matching OpenAI Whisper format
+            result = {
+                "text": text,
+                "segments": formatted_segments,
+                "language": info.language if hasattr(info, 'language') else language
+            }
 
             return result
 

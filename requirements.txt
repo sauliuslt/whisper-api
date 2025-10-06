@@ -1,5 +1,5 @@
 # Core dependencies
-openai-whisper==20240930
+faster-whisper
 torch>=2.0.0
 torchaudio>=2.0.0
 fastapi==0.115.0
