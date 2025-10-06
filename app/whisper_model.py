@@ -145,6 +145,12 @@ class WhisperModel:
             Transcription results dictionary
         """
         try:
+            # Disable word_timestamps on CUDA due to Triton compatibility issue
+            # (triton API changes break openai-whisper's median_filter_cuda)
+            if word_timestamps and self._device == "cuda":
+                logger.warning("Word timestamps disabled on CUDA due to Triton compatibility issue")
+                word_timestamps = False
+
             # Prepare transcription options
             options = {
                 "language": language,
